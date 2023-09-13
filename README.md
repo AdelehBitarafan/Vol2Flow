@@ -10,16 +10,18 @@ This repository contains the codes (in PyTorch) for [Vol2Flow: Segment 3D Volume
 This work proposes a self-supervised algorithm to segment each arbitrary anatomical structure in a 3D medical image produced under various acquisition conditions, dealing with domain shift problems and generalizability. Furthermore, we advocate an interactive setting in the inference time, where the self-supervised model trained on unlabeled volumes should be directly applicable to segment each test volume given the user-provided single slice annotation. To this end, we learn a novel 3D registration network, namely Vol2Flow, from the perspective of image sequence registration to find 2D displacement fields between all adjacent slices within a 3D medical volume together. Specifically, we present a novel 3D CNN-based architecture that finds a series of registration flows between consecutive slices within a whole volume, resulting in a dense displacement field. A new self-supervised algorithm is proposed to learn the transformations or registration fields between the series of 2D images of a 3D volume. Consequently, we enable gradually propagating the userprovided single slice annotation to other slices of a volume in the inference time. We demonstrate that our model substantially outperforms related methods on various medical image segmentation tasks through several experiments on different medical image segmentation datasets.
 
 # Usage
- The main file is "train.py". It contains the learning Vol2Flow in an unsupervised manner. 
+The main file is "train.py". It contains the learning Vol2Flow in an unsupervised manner. To this end, you should insert your training and validation data in "DATA/Training/" and "DATA/Validation/" folders, respectively. 
 
 ```
 python train.py
 ```
+For evalution the model you can use the "eval.py" file. 
+
 
 # Bug Report
 
 If you find a bug, please send a bug report to adeleh.bitarafan[at]sharif.edu. You can also send me any comment or suggestion about the program.
-
+        
 
 # Cite
 If you find this code useful, please cite our paper. Thanks!
