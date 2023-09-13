@@ -1,6 +1,6 @@
 # Vol2Flow: Segment 3D Volumes using a Sequence of Registration Flows
 
-This repository contains the codes (in PyTorch) for [Vol2Flow: Segment 3D Volumes using a Sequence of Registration Flows](https://link.springer.com/chapter/10.1007/978-3-031-16440-8_58) published in [MICCAI, 2022](https://conferences.miccai.org/2022/en/).
+This repository contains the codes (in PyTorch) for [Vol2Flow: Segment 3D Volumes using a Sequence of Registration Flows](https://link.springer.com/chapter/10.1007/978-3-031-16440-8_58) published in [[MICCAI, 2022]](https://conferences.miccai.org/2022/en/).
 
 ![FinalLearning](https://user-images.githubusercontent.com/70052073/176658628-fcca260a-73c0-4388-9434-2bbf72fe11d8.png)
 
