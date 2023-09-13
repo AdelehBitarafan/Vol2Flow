@@ -24,6 +24,7 @@ from Network import UnetReg
 from dataset import *
 from utils import *
 from losses import *
+from eval import *
 
 os.environ['VXM_BACKEND'] = 'pytorch'
 import voxelmorph as vxm
@@ -43,7 +44,7 @@ class Args:
         self.M = 5
         self.lambda_ = 0.5
         self.model_id = f'Vol2Flow_depth:{self.image_volume_depth}_M:{self.M}_Lambda:{self.lambda_}'
-        self.device = 'cpu'
+        self.device = 'cuda'
         
 
         self.saving_base = 'models/'
