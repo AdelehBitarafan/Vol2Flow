@@ -10,7 +10,6 @@ import cv2
 from torch.utils.data import Dataset, DataLoader
 import copy
 import skimage
-from losses import adj_flow_loss
 from torch.utils import data
 from scipy.spatial.distance import dice, jaccard
 
