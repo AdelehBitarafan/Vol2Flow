@@ -1,33 +1,24 @@
 """
 Vol2Flow
 """
-
 # __________________________________________________________________________________ IMPORTS
 import os
-import time
 import numpy as np
-import pickle
-import json
-import tqdm
+import random
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import cv2
 from torch.utils.data import Dataset, DataLoader
-import matplotlib.pyplot as plt
 import copy
 import skimage
-from losses import adj_flow_loss
 from torch.utils import data
-from scipy.spatial.distance import dice, jaccard
 
 from Network import UnetReg
-from dataset import *
-from utils import *
-from losses import *
-from eval import *
-
-os.environ['VXM_BACKEND'] = 'pytorch'
-import voxelmorph as vxm
+from Dataset import *
+from Utils import *
+from Losses import *
+from Eval import *
 
 # __________________________________________________________________________ ARGS and CONFIG
 class Args:
@@ -38,18 +29,18 @@ class Args:
         self.image_shape = (128,128)
         self.size = 128
         self.lr = 1e-4
-        self.epochs = 500
+        self.epochs = 100
         self.batch_size = 1
         self.load_model = None
         self.M = 5
-        self.lambda_ = 0.5
-        self.model_id = f'Vol2Flow_depth:{self.image_volume_depth}_M:{self.M}_Lambda:{self.lambda_}'
+        self.loss ='mse' # mse, mae, ncc, ssim
+        self.model_id = f'Vol2Flow_depth:{self.image_volume_depth}_M:{self.M}_{self.loss}'
         self.device = 'cuda'
         
 
         self.saving_base = 'models/'
         self.data_base = 'DATA/Training/'
-        self.validation_data = 'DATA/Validation/'
+        self.validation_data = 'DATA/Validation/SYNAPS/labeled_images.npy'
         
         self.model_dir = f'{self.saving_base}{self.model_id}/'
         
@@ -65,7 +56,6 @@ class Args:
         model_info += f'image_shape:    {self.image_shape}\n'
         model_info += f'load_model:     {self.load_model}\n'
         model_info += f'M:              {self.M}\n'
-        model_info += f'lambda:         {self.lambda_}\n'
   
         print(model_info)
 
@@ -79,7 +69,6 @@ class Args:
             info.write(model_info)
             info.close()
 
-    
 torch.manual_seed(10)
 torch.cuda.manual_seed(10)
 np.random.seed(10)
@@ -88,22 +77,7 @@ random.seed(10)
 args = Args()
 args.save_info()
 
-# __________________________________________________________________________ LOAD DATA
-training_set = MyDataset(args.image_volume_depth, args.data_base)
-
-params = {'batch_size': 1,
-              'shuffle': True,
-              'num_workers': 0,
-              'drop_last':False}
-
-dataloader = data.DataLoader(training_set, **params, collate_fn=my_collate)
-print(dataloader.__len__())
-print(f'\n__ train smaple shape source: {next(iter(dataloader))[0].shape}\n')
-
-
 # __________________________________________________________________________ CREATE NETWORK
-import torch.nn.functional as F
-
 class SpatialTransformer(nn.Module):
     def __init__(self, size, mode='bilinear'):
         super(SpatialTransformer, self).__init__()
@@ -150,8 +124,22 @@ model = UnetReg(
 model.to(args.device).float()
 
 model.to(args.device)
-_ = model.train()
+model.train()
 
+single_slice_shape = torch.Size([args.size, args.size])
+transformer = SpatialTransformer(single_slice_shape)
+transformer = transformer.to(args.device)
+
+# __________________________________________________________________________ LOSS FUNCTIONS
+if args.loss=='mse':
+    loss_func =  MSE().loss
+elif args.loss=='ssim':
+    loss_func = SSIM().loss
+elif args.loss=='ncc':
+    loss_func = NCC().loss
+elif args.loss=='mae':
+    loss_func = MAE().loss
+    
 # __________________________________________________________________________ OPTIMIZER
 optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
@@ -163,108 +151,89 @@ if args.load_model is not None:
     optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
     print('\n_________ Model Loaded Successfully____\n')
 
-# __________________________________________________________________________ LOSS FUNCTIONS
-single_slice_shape = torch.Size([args.size, args.size])
-transformer = SpatialTransformer(single_slice_shape)
-transformer = transformer.to(args.device)
-
-
-loss_mse =  MSE().loss
-#loss_ssim = SSIM().loss
-#loss_ncc = NCC().loss
-#loss_ours =  Loss_Ours().loss
-
-# _________________________________________________________________________ Train Model
-def print_training_log(epoch_loss, epoch_seg):
-    epoch_info = 'Epoch %d/%d' % (epoch, args.epochs)
-    loss_reg_ = 'Loss_training Data: %.10f' % epoch_loss
-    Dice_seg_ = 'Dice_Testing Data: %.10f' % epoch_seg
-    
-    l = ' - '.join((epoch_info, loss_reg_, Dice_seg_))
-    with open(args.model_dir + 'log.txt', 'a') as f:
-        f.write("%s\n" % l)
-    print(l)
-    
-    
+# __________________________________________________________ TRAIN THE MODEL
+losses_array, Dice_seg_array = [], []
 the_best_dice = 0 
 the_best_epoch = 0 
 the_best_loss = 10000
 
-losses_array, Dice_seg_array = [], []
+import glob
+train_files = glob.glob(args.data_base+'*.npy')
+
 
 for epoch in range(1, args.epochs+1):
-    
-    print('')
-    
-    # Training #############################
     print('Training the model ..... ')
-    model.train()
-
-    print('Epoch is : ', epoch)
     
     running_loss = []
-    print('')
-
-    
-    for volume, idx in dataloader:
-        #volume = edge_profile(volume, False, 3, 1)
-
-        idx = idx.detach().cpu().numpy().item()
-
+    random.shuffle(train_files)
+    for data_path in train_files:
+        print(data_path)
         
-        flow = model(volume.unsqueeze(0).float()).permute(2, 0, 1, 3, 4)
+        dataset = MyDataset(args.image_volume_depth, data_path, args.size)
+        dataloader = torch.utils.data.DataLoader(dataset, args.batch_size)
 
-        
-    
-        volume_pred = torch.zeros(volume.shape)
-        volume_pred[:,idx] = volume[:,idx].clone()
-        
-        max_ = min(args.image_volume_depth-1,idx+args.M)
-        min_ = max(0, idx-args.M)
 
-        '''
-        forward
-        '''
-        for i in range(idx, max_, 1):
-            if volume[:,i+1].sum() <= 0:
-                break
-            volume_pred[:,i+1] = transformer(volume_pred[:,i:i+1].to(args.device).float().clone(), flow[i, :, :2])        
+        for _, data in enumerate(dataloader):
+        
+            volume = data
+            inputs = volume.unsqueeze(1).to(args.device).float()
             
-        '''
-        backward
-        '''
-        for i in range(idx, min_, -1):
-            if volume[:,i-1].sum() <= 0:
-                break
-            volume_pred[:,i-1] = transformer(volume_pred[:,i:i+1].to(args.device).float().clone(), flow[i, :, 2:]) 
+            _, e = valid_range(volume[0])
+            idx_arr = np.arange(1, e-1)
+            random.shuffle(idx_arr)
             
+            for idx in idx_arr:
+            
+                flow = model(inputs).permute(2, 0, 1, 3, 4)
+                
+                start = max(idx - args.M, 0)
+                end = min(idx+ args.M, args.image_volume_depth-1)
+
+                volume_pred = torch.zeros(volume.shape)
+                volume_pred[:, idx] = volume[:,idx].clone()
         
-        loss = loss_mse(volume[:,min_:max_+1].to(args.device).float(), volume_pred[:,min_:max_+1].to(args.device).float()) 
-        print('loss: ', loss)
+                max_ = min(args.image_volume_depth-1,idx+args.M)
+                min_ = max(0, idx-args.M)
 
         
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+                '''
+                forward
+                '''
+                for i in range(idx, max_, 1):
+                    if volume[:,i+1].sum() <= 0:
+                        break
+                    volume_pred[:,i+1] = transformer(volume_pred[:,i:i+1].to(args.device).float().clone(), flow[i, :, :2])        
+ 
+                '''
+                backward
+                '''
+                for i in range(idx, min_, -1):
+                    if volume[:,i-1].sum() <= 0:
+                        break
+                    volume_pred[:,i-1] = transformer(volume_pred[:,i:i+1].to(args.device).float().clone(), flow[i, :, 2:]) 
+
+
+                loss = loss_func(volume[:,min_:max_+1].to(args.device).float(), volume_pred[:,min_:max_+1].to(args.device).float()) 
+             
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
         
-        running_loss.append(loss.item())
+                running_loss.append(loss.item())
     
-        
-    epoch_loss = sum(running_loss)/len(running_loss)
-    print('Average loss is: ', epoch_loss)
-    losses_array.append(epoch_loss)
+    
+    losses_array.append(np.mean(running_loss))
         
     # Testing ##############################
     
     print('Testing the model ..... ')
     model.eval()
-
-
-    dice3D = evaluate(model, args.validation_data, args.device, organs=[255])
-    print('Average Dice is: ', dice3D)
+    
+    dice3D = evaluate(model, transformer, args.validation_data, args.device, args.size, args.image_volume_depth, ORGAN_IDX=6)
+    
     Dice_seg_array.append(dice3D)
     
-    print_training_log(epoch_loss, dice3D)
+    print_training_log(epoch, args.epochs, np.mean(running_loss), dice3D, args.model_dir)
         
     if the_best_dice < dice3D:
         the_best_epoch = epoch
@@ -279,5 +248,7 @@ for epoch in range(1, args.epochs+1):
 
 
 print('The best model is in epoch {} with {} dice score.'.format(the_best_epoch, the_best_dice))
+
+
 
 
